@@ -1,3 +1,4 @@
+import winsound
 import tkinter as tk
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +17,8 @@ class CurrencyApp:
         # Налаштування вікна: без рамок, завжди зверху
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", 0.9) # 0.9 - це 90% непрозорості
+        self.root.wm_attributes("-toolwindow", True)
         
         # Встановлюємо збережену позицію або дефолтну (правій нижній кут)
         pos = self.config.get("position", "+1500+1010")
@@ -104,12 +107,54 @@ class CurrencyApp:
             return None
 
     def perform_update(self):
+        # 1. Отримуємо старе значення для порівняння
+        raw_old = self.rates.get(self.current_main, "0").split(' / ')[0]
+        try:
+            old_val = float(raw_old.replace(',', '.'))
+        except:
+            old_val = 0.0
+
         data = self.get_data()
         if data:
+            new_raw = data.get(self.current_main, "0").split(' / ')[0]
+            try:
+                new_val = float(new_raw.replace(',', '.'))
+                
+                # Рахуємо різницю (модуль числа)
+                diff = abs(new_val - old_val)
+
+                # 2. Логіка зміни кольору та ЗВУКУ
+                if old_val != 0 and new_val != old_val:
+                    if new_val > old_val:
+                        self.label.config(fg="#00ff00") # Зелений (курс зріс)
+                    else:
+                        self.label.config(fg="#ff4d4d") # Червоний (курс впав)
+
+                    # ЯКЩО РІЗНИЦЯ > 0.10 грн (10 копійок) — подаємо сигнал
+                    if diff >= 0.10:
+                        # Частота 1000 Гц, тривалість 500 мс
+                        winsound.Beep(1000, 500) 
+                else:
+                    self.label.config(fg="#ffffff")
+
+            except Exception as e:
+                print(f"Помилка конвертації: {e}")
+                self.label.config(fg="#ffffff")
+
             self.rates.update(data)
             self.label.config(text=f"{self.current_main}: {self.rates[self.current_main]}")
         else:
-            self.label.config(text="Помилка оновлення")
+            self.label.config(text="Помилка мережі", fg="orange")
+
+        self.root.after(300000, lambda: self.label.config(fg="#ffffff"))
+
+    def set_currency(self, cur):
+        self.current_main = cur
+        # Примусово скидаємо колір на білий при зміні валюти, 
+        # бо ми ще не знаємо динаміку для нової обраної валюти
+        self.label.config(fg="#ffffff") 
+        self.perform_update()
+        self.save_current_config()
 
     def data_loop(self):
         while True:
@@ -138,11 +183,6 @@ class CurrencyApp:
         menu.add_separator()
         menu.add_command(label="Вихід", command=self.root.destroy)
         menu.post(event.x_root, event.y_root)
-
-    def set_currency(self, cur):
-        self.current_main = cur
-        self.perform_update()
-        self.save_current_config()
 
 if __name__ == "__main__":
     CurrencyApp()
