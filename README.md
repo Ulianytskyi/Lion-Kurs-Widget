@@ -24,7 +24,7 @@
 ## 🚀 Встановлення та запуск
 1. Клонуйте репозиторій:
    ```bash
-   git clone [https://github.com/ваш-нікнейм/lion-kurs-widget.git](https://github.com/ваш-нікнейм/lion-kurs-widget.git)
+   git clone [https://github.com/Ulianytskyi/lion-kurs-widget.git](https://github.com/Ulianytskyi/lion-kurs-widget.git)
 
 Або скористайтеся готовим `.exe` файлом у розділі **Releases**.
 
