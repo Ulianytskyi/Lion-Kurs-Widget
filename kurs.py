@@ -1,39 +1,52 @@
 import winsound
 import tkinter as tk
+from tkinter import Menu, messagebox
 import requests
 from bs4 import BeautifulSoup
 import threading
 import time
 import json
 import os
+import logging
+from datetime import datetime
 
+# --- КОНФІГУРАЦІЯ ---
 CONFIG_FILE = "widget_config.json"
+LOG_FILENAME = "kurs_history.log"
+
+# Налаштування логів
+logging.basicConfig(
+    filename=LOG_FILENAME,
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    encoding='utf-8'
+)
 
 class CurrencyApp:
     def __init__(self):
         self.config = self.load_config()
         self.root = tk.Tk()
         
-        # Налаштування вікна: без рамок, завжди зверху
+        # Налаштування вікна
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.9) # 0.9 - це 90% непрозорості
+        self.root.attributes("-alpha", 0.9)
         self.root.wm_attributes("-toolwindow", True)
         
-        # Встановлюємо збережену позицію або дефолтну (правій нижній кут)
         pos = self.config.get("position", "+1500+1010")
         self.root.geometry(f"180x35{pos}")
-        self.root.configure(bg='#1e1e1e') # Колір під темну тему Windows
+        self.root.configure(bg='#1e1e1e')
 
         self.rates = {"USD": "...", "EUR": "...", "PLN": "..."}
         self.current_main = self.config.get("main_currency", "USD")
 
-        # Основний текст
+        # Інтерфейс
         self.label = tk.Label(self.root, text="Завантаження...", fg="#ffffff", 
                               bg="#1e1e1e", font=("Segoe UI", 10, "bold"), cursor="hand2")
         self.label.pack(expand=True, fill="both")
 
-        # Спливаюче вікно (EUR/PLN)
+        # Popup
         self.popup = tk.Toplevel(self.root)
         self.popup.overrideredirect(True)
         self.popup.attributes("-topmost", True)
@@ -51,33 +64,11 @@ class CurrencyApp:
         self.label.bind("<ButtonRelease-1>", self.save_current_config)
         self.label.bind("<Button-3>", self.show_menu)
 
-        # Запуск фонового потоку
+        # Потоки
         threading.Thread(target=self.data_loop, daemon=True).start()
-        
-        # Метод для постійної перевірки "topmost" стану
         self.keep_on_top()
         
         self.root.mainloop()
-
-    def keep_on_top(self):
-        """Примусово тримає вікно поверх усіх інших кожні 2 секунди"""
-        self.root.attributes("-topmost", True)
-        self.root.lift()
-        self.root.after(2000, self.keep_on_top)
-
-    def load_config(self):
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r") as f:
-                    return json.load(f)
-            except: pass
-        return {}
-
-    def save_current_config(self, event=None):
-        self.config["position"] = f"+{self.root.winfo_x()}+{self.root.winfo_y()}"
-        self.config["main_currency"] = self.current_main
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(self.config, f)
 
     def get_data(self):
         url = "https://lion-kurs.rv.ua/"
@@ -88,7 +79,7 @@ class CurrencyApp:
             soup = BeautifulSoup(res.text, 'html.parser')
             new_rates = {}
 
-            # Мапінг по іконках прапорів
+            # ВАШ ПЕРЕВІРЕНИЙ МАПІНГ
             mapping = {"usd.gif": "USD", "eur.gif": "EUR", "pol.gif": "PLN"}
 
             rows = soup.find_all('tr')
@@ -97,6 +88,7 @@ class CurrencyApp:
                 if img and img.get('src'):
                     src = img.get('src').split('/')[-1]
                     if src in mapping:
+                        # Шукаємо саме ті колонки, що були у вас
                         cols = row.find_all('td', class_='white')
                         if len(cols) >= 2:
                             buy = cols[0].get_text(strip=True)
@@ -107,7 +99,6 @@ class CurrencyApp:
             return None
 
     def perform_update(self):
-        # 1. Отримуємо старе значення для порівняння
         raw_old = self.rates.get(self.current_main, "0").split(' / ')[0]
         try:
             old_val = float(raw_old.replace(',', '.'))
@@ -119,26 +110,22 @@ class CurrencyApp:
             new_raw = data.get(self.current_main, "0").split(' / ')[0]
             try:
                 new_val = float(new_raw.replace(',', '.'))
-                
-                # Рахуємо різницю (модуль числа)
                 diff = abs(new_val - old_val)
 
-                # 2. Логіка зміни кольору та ЗВУКУ
                 if old_val != 0 and new_val != old_val:
-                    if new_val > old_val:
-                        self.label.config(fg="#00ff00") # Зелений (курс зріс)
-                    else:
-                        self.label.config(fg="#ff4d4d") # Червоний (курс впав)
+                    # Визначаємо тренд для логів
+                    trend = "ВГОРУ" if new_val > old_val else "ВНИЗ"
+                    self.label.config(fg="#00ff00" if new_val > old_val else "#ff4d4d")
 
-                    # ЯКЩО РІЗНИЦЯ > 0.10 грн (10 копійок) — подаємо сигнал
+                    # ЗАПИС У ЛОГ
+                    logging.info(f"{self.current_main}: {old_val:.2f} -> {new_val:.2f} ({trend})")
+
                     if diff >= 0.10:
-                        # Частота 1000 Гц, тривалість 500 мс
                         winsound.Beep(1000, 500) 
                 else:
                     self.label.config(fg="#ffffff")
 
-            except Exception as e:
-                print(f"Помилка конвертації: {e}")
+            except:
                 self.label.config(fg="#ffffff")
 
             self.rates.update(data)
@@ -146,25 +133,70 @@ class CurrencyApp:
         else:
             self.label.config(text="Помилка мережі", fg="orange")
 
-        self.root.after(300000, lambda: self.label.config(fg="#ffffff"))
+    # --- ФУНКЦІЯ ГРАФІКА ---
+    def show_chart(self):
+        threading.Thread(target=self._plot_thread, daemon=True).start()
 
-    def set_currency(self, cur):
-        self.current_main = cur
-        # Примусово скидаємо колір на білий при зміні валюти, 
-        # бо ми ще не знаємо динаміку для нової обраної валюти
-        self.label.config(fg="#ffffff") 
-        self.perform_update()
-        self.save_current_config()
+    def _plot_thread(self):
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+
+            if not os.path.exists(LOG_FILENAME):
+                messagebox.showinfo("Lion Kurs", "Лог порожній.")
+                return
+
+            times, vals = [], []
+            with open(LOG_FILENAME, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if f"- {self.current_main}:" in line:
+                        try:
+                            parts = line.split(' - ')
+                            dt = datetime.strptime(parts[0], '%Y-%m-%d %H:%M:%S')
+                            v = float(parts[1].split(' -> ')[1].split(' ')[0].replace(',', '.'))
+                            times.append(dt)
+                            vals.append(v)
+                        except: continue
+
+            if len(times) < 2:
+                messagebox.showinfo("Lion Kurs", "Треба хоча б 2 зміни курсу в логах.")
+                return
+
+            plt.figure(figsize=(8, 4))
+            plt.plot(times, vals, marker='o', color='#0057b8')
+            plt.title(f"Історія {self.current_main}")
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            plt.gcf().autofmt_xdate()
+            plt.grid(True, alpha=0.3)
+            plt.show()
+        except ImportError:
+            messagebox.showerror("Помилка", "Встановіть matplotlib: pip install matplotlib")
+
+    # --- СТАНДАРТНІ МЕТОДИ ---
+    def keep_on_top(self):
+        self.root.attributes("-topmost", True)
+        self.root.after(2000, self.keep_on_top)
+
+    def load_config(self):
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r") as f: return json.load(f)
+            except: pass
+        return {}
+
+    def save_current_config(self, event=None):
+        self.config["position"] = f"+{self.root.winfo_x()}+{self.root.winfo_y()}"
+        self.config["main_currency"] = self.current_main
+        with open(CONFIG_FILE, "w") as f: json.dump(self.config, f)
 
     def data_loop(self):
         while True:
             self.perform_update()
-            time.sleep(3600) # Оновлення кожну годину
+            time.sleep(3600)
 
     def show_popup(self, event):
         others = [f"{k}: {v}" for k, v in self.rates.items() if k != self.current_main]
         self.pop_label.config(text="\n".join(others))
-        # Позиція вікна над віджетом
         self.popup.geometry(f"+{self.root.winfo_x()}+{self.root.winfo_y() - 65}")
         self.popup.deiconify()
 
@@ -177,6 +209,7 @@ class CurrencyApp:
     def show_menu(self, event):
         menu = tk.Menu(self.root, tearoff=0)
         menu.add_command(label="🔄 Оновити зараз", command=self.perform_update)
+        menu.add_command(label="📈 Графік змін", command=self.show_chart)
         menu.add_separator()
         for cur in ["USD", "EUR", "PLN"]:
             menu.add_command(label=f"Показувати {cur}", command=lambda c=cur: self.set_currency(c))
